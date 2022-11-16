@@ -1,0 +1,21 @@
+{
+  "scripts": {
+    "test": "DOTENV_CONFIG_PATH=./test/.env.test jest"
+  },
+  "dependencies": {
+    "bignumber.js": "^9.1.0",
+    "dotenv": "^16.0.3",
+    "ethers": "^5.7.2"
+  },
+  "name": "riseid.js",
+  "version": "1.0.0",
+  "description": "RisePay npm module to facilitate interaction with RiseID's contracts",
+  "main": "index.js",
+  "repository": "https://github.com/riseworks/riseid.js.git",
+  "author": "Rise",
+  "license": "MIT",
+  "private": false,
+  "devDependencies": {
+    "jest": "^29.3.1"
+  }
+}
