@@ -1,17 +1,34 @@
 const { RiseIDFactory, certifiedAttributes } = require('../src/riseid')
 const { ethers } = require('ethers')
+const { ArbTable } = require('../src/utils/arbTable')
+const dotenv = require('dotenv')
 
-const { RISE_ID_ADDRESS, WALLET_KEY, RPC_ENDPOINT } = process.env
+const envs = dotenv.parse(require('fs').readFileSync('./test/.env.test').toString())
+const {
+  RISE_ID_ADDRESS,
+  OWNER_WALLET_PRIV_KEY,
+  RPC_ENDPOINT,
+  RIDE_ID_DELEGATE_PRIV_KEY
+} = envs
 
 describe('Read certified attributes and set/read user attributes from a RiseID', 
 () => {
   let riseId
+  let rpc
+  let provider, delegateProvider
+
+  let ownerAddress
+  let riseIdDelegateAddress
 
   beforeAll(async () => {
-    const rpc = new ethers.providers.JsonRpcProvider(RPC_ENDPOINT)
-    provider = new ethers.Wallet(WALLET_KEY, rpc)
+    rpc = new ethers.providers.JsonRpcProvider(RPC_ENDPOINT)
+    provider = new ethers.Wallet(OWNER_WALLET_PRIV_KEY, rpc)
+    delegateProvider = new ethers.Wallet(RIDE_ID_DELEGATE_PRIV_KEY, rpc)
     riseId = await RiseIDFactory.getRiseID(RISE_ID_ADDRESS, rpc)
-  })
+
+    riseIdDelegateAddress = delegateProvider.address
+    ownerAddress = provider.address
+  }, 2000000)
 
   test('Read all certified RiseID attributes', async () => {
     // read all attributes
@@ -54,5 +71,65 @@ describe('Read certified attributes and set/read user attributes from a RiseID',
 
   }, 2000000)
 
+  test('Add RiseID delegate address', async () => {
+    const add = async () => {
+      await riseId.connect(provider).addDelegateAddress(riseIdDelegateAddress)
+      await riseId.loadWallets()
+      expect(riseId.delegates.includes(riseIdDelegateAddress)).toBe(true)
+    }
 
+    const remove = async () => {
+      await riseId.connect(provider).removeDelegateAddress(riseIdDelegateAddress)
+      await riseId.loadWallets()
+      expect(!riseId.delegates.includes(riseIdDelegateAddress)).toBe(true)
+    }
+
+    const wallets = await riseId.loadWallets()
+    if (wallets.includes(riseIdDelegateAddress)) {
+      await remove()
+      await add()
+    } else {
+      await add()
+      await remove()
+    }
+  }, 2000000)
+
+  test('Add RiseID delegate by idx', async () => {
+    const idx = await ArbTable.connect(provider).lookup(riseIdDelegateAddress)
+    
+    const add = async () => {
+      await riseId.connect(provider).addDelegateIdx(idx)
+      await riseId.loadWallets()
+      expect(riseId.delegates.includes(riseIdDelegateAddress)).toBe(true)
+    }
+
+    const remove = async () => {
+      await riseId.connect(provider).removeDelegateIdx(idx)
+      await riseId.loadWallets()
+      expect(!riseId.delegates.includes(riseIdDelegateAddress)).toBe(true)
+    }
+
+    const wallets = await riseId.loadWallets()
+    if (wallets.includes(riseIdDelegateAddress)) {
+      await remove()
+      await add()
+    } else {
+      await add()
+      await remove()
+    }
+  }, 200000)
+
+  test('Transfer Ownership', async () => {
+    await riseId.loadWallets()
+
+    // transfer to delegate
+    await riseId.connect(provider).transferOwnership(riseIdDelegateAddress)
+    await riseId.loadWallets()
+    expect(riseId.owner).toBe(riseIdDelegateAddress)
+
+    // transfer back to old owner
+    await riseId.connect(delegateProvider).transferOwnership(ownerAddress)
+    await riseId.loadWallets()
+    expect(riseId.owner).toBe(ownerAddress)
+  }, 200000)
 })

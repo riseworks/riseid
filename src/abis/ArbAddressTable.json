@@ -1,0 +1,4 @@
+[
+  "function lookup(address addr) external view returns(uint)",
+  "function lookupIndex(uint index) external view returns(address)"
+]

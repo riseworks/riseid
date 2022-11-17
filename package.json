@@ -1,11 +1,13 @@
 {
   "scripts": {
-    "test": "DOTENV_CONFIG_PATH=./test/.env.test jest"
+    "test": "jest",
+    "test2": "node src/index.js"
   },
   "dependencies": {
     "bignumber.js": "^9.1.0",
     "dotenv": "^16.0.3",
-    "ethers": "^5.7.2"
+    "ethers": "^5.7.2",
+    "request": "^2.88.2"
   },
   "name": "riseid.js",
   "version": "1.0.0",

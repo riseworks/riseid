@@ -1,14 +1,12 @@
 const { ethers } = require('ethers')
 const { certifiedAttributes, roles } = require('./constants')
 const BigNumber = require('bignumber.js')
+const request = require('request')
 
 const keccak256 = v => ethers.utils.id(`${v}`)
 
-const { RiseIDABI } = require('./abis')
-
-const RiseAccessABI = [
-  "function hasRole(bytes32 role, address account) external view returns (bool)"
-]
+const { RiseIDABI, RiseAccessABI, ERC20ABI } = require('./abis')
+const { isAddress } = require('./utils/validation')
 
 const RiseCertifiedAttribTypes = {
   RISE_FLAT_COUNT: 'decimal',
@@ -53,10 +51,12 @@ const parseAttributes = (data, parseMap) => {
 
 class RiseID {
   contract = null
+  riseContracts = null
   wallets = []
 
-  constructor (contract) {
+  constructor (contract, riseContracts) {
     this.contract = contract
+    this.riseContracts = riseContracts
   }
 
   connect(signerOrProvider) {
@@ -83,6 +83,60 @@ class RiseID {
     ])
     this.wallets = [owner, ...delegates]
     return this.wallets
+  }
+
+  async transferOwnership (newOwnerAddress) {
+    if (!isAddress(newOwnerAddress)) throw 'Invalid new owner address'
+    const tx = await this.contract.transferOwnership(newOwnerAddress).then(tx => tx.wait())
+    await this.loadWallets()
+    return tx
+  }
+
+  async addDelegateAddress (delegateAddress) {
+    if (!isAddress(delegateAddress)) throw 'Invalid delegate address'
+    const tx = await this.contract['addDelegate(address)'](delegateAddress).then(tx => tx.wait())
+    await this.loadWallets()
+    return tx
+  }
+
+  async addDelegateIdx (delegateIdx) {
+    const tx = await this.contract['addDelegate(uint256)'](delegateIdx).then(tx => tx.wait())
+    await this.loadWallets()
+    return tx
+  }
+
+  async removeDelegateAddress (delegateAddress) {
+    if (!isAddress(delegateAddress)) throw 'Invalid delegate address'
+    const tx = await this.contract['removeDelegate(address)'](delegateAddress).then(tx => tx.wait())
+    await this.loadWallets()
+    return tx
+  }
+
+  async removeDelegateIdx (delegateIdx) {
+    const tx = await this.contract['removeDelegate(uint256)'](delegateIdx).then(tx => tx.wait())
+    await this.loadWallets()
+    return tx
+  }
+
+  async getBalance (convertToUSD) {
+    const token = new ethers.Contract(this.riseContracts.RisePayToken.address, ERC20ABI, this.contract.provider)
+    const b = await token['balanceOf(address)'](this.contract.address)
+    if (convertToUSD) return BigNumber(`${b}`).div(1e6).toNumber()
+    return BigNumber(`${b}`)
+  }
+
+  async getUSDCBalance (convertToUSD) {
+    const token = new ethers.Contract(this.riseContracts.USDC.address, ERC20ABI, this.contract.provider)
+    const b = await token.balanceOf(this.contract.address)
+    if (convertToUSD) return BigNumber(`${b}`).div(1e6).toNumber()
+    return BigNumber(`${b}`)
+  }
+
+  async getTokenBalance (tokenAddress) {
+    if (!isAddress(tokenAddress)) throw 'Invalid token address'
+    const token = new ethers.Contract(tokenAddress, ERC20ABI, this.contract.provider)
+    const b = await token.balanceOf(this.contract.address)
+    return BigNumber(`${b}`)
   }
 
   async getCertifiedData (attributesArray = null) {
@@ -153,11 +207,19 @@ class RiseIDFactory {
     const riseContract = new ethers.Contract(address, RiseIDABI, signerOrProvider)
 
     try {
-      const riseAccessAddress = await riseContract['riseAccess()']()
-      const riseAccessContract = new ethers.Contract(riseAccessAddress, RiseAccessABI, signerOrProvider)
+      const promise = new Promise((res, rej) => {
+        request.get('http://localhost:3001/v1/contracts/riseid', (error, resp, body) => {
+          if (error) return rej(error)
+          if (!`${resp.statusCode}`.startsWith('2')) rej (`Wrong status code ${resp.statusCode}`)
+          res(JSON.parse(body))
+        })
+      })
+      const contracts = await promise
+
+      const riseAccessContract = new ethers.Contract(contracts.RiseAccess.address, RiseAccessABI, signerOrProvider)
       const isRiseId = await riseAccessContract.hasRole(roles.RISE_ID_IS_ID, address)
       if (!isRiseId) throw 'This address is not a RiseID contract'
-      return new RiseID(riseContract)
+      return new RiseID(riseContract, contracts)
     } catch (e) {
       console.log(e)
       throw 'Failed to read riseAccess contract, are you sure this is a RiseID address?'
