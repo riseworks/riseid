@@ -1,0 +1,4 @@
+[
+  "function fund(address riseID, uint usdcAmount)",
+  "function fund(address riseID, uint tokenAmount, address token)"
+]

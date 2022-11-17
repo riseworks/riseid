@@ -5,8 +5,9 @@ const request = require('request')
 
 const keccak256 = v => ethers.utils.id(`${v}`)
 
-const { RiseIDABI, RiseAccessABI, ERC20ABI } = require('./abis')
+const { RiseIDABI, RiseAccessABI, ERC20ABI, RisePayRampIndependentFundingABI } = require('./abis')
 const { isAddress } = require('./utils/validation')
+const { ArbTable, resolveAddressOrIdx } = require('./utils/arbTable')
 
 const RiseCertifiedAttribTypes = {
   RISE_FLAT_COUNT: 'decimal',
@@ -52,6 +53,7 @@ const parseAttributes = (data, parseMap) => {
 class RiseID {
   contract = null
   riseContracts = null
+  l1SignerOrProvider = null
   wallets = []
 
   constructor (contract, riseContracts) {
@@ -60,10 +62,20 @@ class RiseID {
   }
 
   connect(signerOrProvider) {
-    return new RiseID(this.contract.connect(signerOrProvider))
+    return new RiseID(this.contract.connect(signerOrProvider), this.riseContracts)
+  }
+
+  connectL1(signerOrProvider) {
+    const riseId = new RiseID(this.contract.connect(signerOrProvider), this.riseContracts)
+    riseId.l1SignerOrProvider = signerOrProvider
+    return riseId
   }
 
   // getters
+  get address () {
+    return this.contract.address
+  }
+
   get owner () {
     return this.wallets.length ? this.wallets[0] : null
   }
@@ -118,17 +130,15 @@ class RiseID {
     return tx
   }
 
-  async getBalance (convertToUSD) {
+  async getBalance () {
     const token = new ethers.Contract(this.riseContracts.RisePayToken.address, ERC20ABI, this.contract.provider)
     const b = await token['balanceOf(address)'](this.contract.address)
-    if (convertToUSD) return BigNumber(`${b}`).div(1e6).toNumber()
     return BigNumber(`${b}`)
   }
 
-  async getUSDCBalance (convertToUSD) {
+  async getUSDCBalance () {
     const token = new ethers.Contract(this.riseContracts.USDC.address, ERC20ABI, this.contract.provider)
     const b = await token.balanceOf(this.contract.address)
-    if (convertToUSD) return BigNumber(`${b}`).div(1e6).toNumber()
     return BigNumber(`${b}`)
   }
 
@@ -199,6 +209,63 @@ class RiseID {
 
     const tx = await this.contract.setData(keys, values).then(tx => tx.wait())
     return tx
+  }
+
+  fundWithUSDCBalance (tokenAmount) {
+    return this.fundWithTokenBalance(this.riseContracts.USDC.arbIndex, tokenAmount)
+  }
+
+  async fundWithTokenBalance (tokenAddressOrIdx, tokenAmount) {
+    const usdcAddress = this.riseContracts.USDC.address
+    const usdcIdx = this.riseContracts.USDC.arbIndex
+
+    let rampIdx
+    if ([usdcAddress, usdcIdx].includes(`${tokenAddressOrIdx}`)) rampIdx = this.riseContracts.RisePayRampUSDC.arbIndex
+    else rampIdx = this.riseContracts.RisePayRampUniswap.arbIndex
+
+    const tokenIdx = resolveAddressOrIdx(ArbTable.connect(this.contract.provider), tokenAddressOrIdx)
+
+    return await this.contract['executeRiseFund(uint256,uint256,uint256)'](tokenIdx, rampIdx, tokenAmount).then(tx => tx.wait())
+  }
+
+  fundWithUSDCAllowance (tokenAmount, fromAddressOrIdx) {
+    return this.fundWithTokenAllowance(this.riseContracts.USDC.arbIndex, tokenAmount, fromAddressOrIdx)
+  }
+
+  async fundWithTokenAllowance (tokenAddressOrIdx, tokenAmount, fromAddressOrIdx) {
+    const usdcAddress = this.riseContracts.USDC.address
+    const usdcIdx = this.riseContracts.USDC.arbIndex
+
+    let rampIdx
+    if ([usdcAddress, usdcIdx].includes(`${tokenAddressOrIdx}`)) rampIdx = this.riseContracts.RisePayRampUSDC.arbIndex
+    else rampIdx = this.riseContracts.RisePayRampUniswap.arbIndex
+    console.log(rampIdx)
+
+    const table = ArbTable.connect(this.contract.provider)
+    const [tokenIdx, fromIdx] = await Promise.all([
+      resolveAddressOrIdx(table, tokenAddressOrIdx),
+      resolveAddressOrIdx(table, fromAddressOrIdx)
+    ])
+
+    return await this.contract['executeRiseFund(uint256,uint256,uint256,uint256)'](tokenIdx, rampIdx, tokenAmount, fromIdx).then(tx => tx.wait())
+  }
+
+  async fundWithUSDCL1 (tokenAmount) {
+    return this.fundWithTokenL1(this.riseContracts.MAINNET_USDC.address, tokenAmount)
+  }
+
+  async fundWithTokenL1 (tokenAddress, tokenAmount) {
+    if (!this.l1SignerOrProvider) throw 'You need to connect a l1 provider'
+    const l1Ramp = new ethers.Contract('0x306c8FacAE91B4722B55d2BB7A7A9e7a46c7aCCC', RisePayRampIndependentFundingABI, this.l1SignerOrProvider)
+    
+    let tx
+    if (tokenAddress === this.riseContracts.MAINNET_USDC.address) {
+      console.log('here')
+      tx = await l1Ramp['fund(address,uint256)'](this.contract.address, tokenAmount)
+    } else {
+      tx = await l1Ramp['fund(address,uint256,address)'](this.contract.address, tokenAmount, tokenAddress)
+    }
+    return await tx.wait()
   }
 }
 
