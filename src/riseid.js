@@ -1,11 +1,11 @@
 const { ethers } = require('ethers')
-const { certifiedAttributes, roles } = require('./constants')
+const { certifiedAttributes, roles, riseIdOperations } = require('./constants')
 const BigNumber = require('bignumber.js')
 const request = require('request')
 
 const keccak256 = v => ethers.utils.id(`${v}`)
 
-const { RiseIDABI, RiseAccessABI, ERC20ABI, RisePayRampIndependentFundingABI } = require('./abis')
+const { RiseIDABI, RiseAccessABI, ERC20ABI, RisePayRampIndependentFundingABI, RisePayABI, RisePayTokenABI } = require('./abis')
 const { isAddress } = require('./utils/validation')
 const { ArbTable, resolveAddressOrIdx } = require('./utils/arbTable')
 
@@ -52,6 +52,7 @@ const parseAttributes = (data, parseMap) => {
 
 class RiseID {
   contract = null
+  payContract = null
   riseContracts = null
   l1SignerOrProvider = null
   wallets = []
@@ -59,6 +60,7 @@ class RiseID {
   constructor (contract, riseContracts) {
     this.contract = contract
     this.riseContracts = riseContracts
+    this.payContract = new ethers.Contract(this.riseContracts.RisePay.address, RisePayABI, this.contract.provider)
   }
 
   connect(signerOrProvider) {
@@ -104,28 +106,14 @@ class RiseID {
     return tx
   }
 
-  async addDelegateAddress (delegateAddress) {
-    if (!isAddress(delegateAddress)) throw 'Invalid delegate address'
+  async addDelegate (delegateAddress) {
     const tx = await this.contract['addDelegate(address)'](delegateAddress).then(tx => tx.wait())
     await this.loadWallets()
     return tx
   }
 
-  async addDelegateIdx (delegateIdx) {
-    const tx = await this.contract['addDelegate(uint256)'](delegateIdx).then(tx => tx.wait())
-    await this.loadWallets()
-    return tx
-  }
-
-  async removeDelegateAddress (delegateAddress) {
-    if (!isAddress(delegateAddress)) throw 'Invalid delegate address'
+  async removeDelegate (delegateAddress) {
     const tx = await this.contract['removeDelegate(address)'](delegateAddress).then(tx => tx.wait())
-    await this.loadWallets()
-    return tx
-  }
-
-  async removeDelegateIdx (delegateIdx) {
-    const tx = await this.contract['removeDelegate(uint256)'](delegateIdx).then(tx => tx.wait())
     await this.loadWallets()
     return tx
   }
@@ -223,7 +211,7 @@ class RiseID {
     if ([usdcAddress, usdcIdx].includes(`${tokenAddressOrIdx}`)) rampIdx = this.riseContracts.RisePayRampUSDC.arbIndex
     else rampIdx = this.riseContracts.RisePayRampUniswap.arbIndex
 
-    const tokenIdx = resolveAddressOrIdx(ArbTable.connect(this.contract.provider), tokenAddressOrIdx)
+    const tokenIdx = await resolveAddressOrIdx(ArbTable.connect(this.contract.provider), tokenAddressOrIdx)
 
     return await this.contract['executeRiseFund(uint256,uint256,uint256)'](tokenIdx, rampIdx, tokenAmount).then(tx => tx.wait())
   }
@@ -250,7 +238,7 @@ class RiseID {
     return await this.contract['executeRiseFund(uint256,uint256,uint256,uint256)'](tokenIdx, rampIdx, tokenAmount, fromIdx).then(tx => tx.wait())
   }
 
-  async fundWithUSDCL1 (tokenAmount) {
+  fundWithUSDCL1 (tokenAmount) {
     return this.fundWithTokenL1(this.riseContracts.MAINNET_USDC.address, tokenAmount)
   }
 
@@ -266,6 +254,86 @@ class RiseID {
       tx = await l1Ramp['fund(address,uint256,address)'](this.contract.address, tokenAmount, tokenAddress)
     }
     return await tx.wait()
+  }
+
+  withdrawUSDC (amount, destAddressOrIdx) {
+    return this.withdrawToken(this.riseContracts.USDC.arbIndex, amount, destAddressOrIdx)
+  }
+
+  async withdrawToken (tokenAddressOrIdx, amount, destAddressOrIdx) {
+    const [tokenIdx, destIdx] = await Promise.all([
+      resolveAddressOrIdx(ArbTable.connect(this.contract.provider), tokenAddressOrIdx),
+      resolveAddressOrIdx(ArbTable.connect(this.contract.provider), destAddressOrIdx),
+    ])
+
+    const USDC = this.riseContracts.USDC
+    let data
+    if ([USDC.address, USDC.arbIndex].includes(`${tokenAddressOrIdx}`)) {
+      const rampIdx = this.riseContracts.RisePayRampUSDC.arbIndex
+      data = this.payContract.interface.encodeFunctionData('withdraw(uint256,uint256,uint256)', [rampIdx, amount, destIdx])
+    } else {
+      const rampIdx = this.riseContracts.RisePayRampUniswap.arbIndex
+      data = this.payContract.interface.encodeFunctionData('withdraw(uint256,uint256,uint256,uint256)', [tokenIdx, rampIdx, amount, destIdx])
+    }
+    return await this.contract.executeRise(data).then(tx => tx.wait())
+  }
+
+  /** bankRamp should be ACH/Wire ramps */
+  async withdrawBankAccount (usdcAmount, bankRamp) {
+    const data = this.payContract.interface.encodeFunctionData('withdraw(uint256,uint256)', [bankRamp.arbIndex, usdcAmount])
+    return await this.contract.executeRise(data).then(tx => tx.wait())
+  }
+
+  async withdrawUSDCL1 (amount, destAddressOnL1) {
+    if (!isAddress(destAddressOnL1)) throw 'Invalid dest address'
+    const rampAddress = this.riseContracts.RisePayRampUSDCEthereumL1.address
+
+    const data = this.contract.interface.encodeFunctionData('withdraw(address,uint256,address)', [rampAddress, amount, destAddressOnL1])
+    return await this.contract.executeRise(data).then(tx => tx.wait())
+  }
+
+  async pay(riseIdPayeeIdx, amount, salt) {
+    const address = await ArbTable.connect(this.contract.provider).lookupIndex(riseIdPayeeIdx)
+
+    const riseToken = new ethers.Contract(this.riseContracts.RisePayToken.address, RisePayTokenABI, this.contract.provider)
+    const sent = await riseToken.txSent(this.contract.address, address, amount, salt)
+    if (sent) throw 'This payment has already been made'
+
+    const data = this.payContract.interface.encodeFunctionData('pay(uint256,uint256,uint256)', [riseIdPayeeIdx, amount, salt])
+    return await this.contract.executeRise(data).then(tx => tx.wait())
+  }
+
+  async batchPay(payments) {
+    const riseToken = new ethers.Contract(this.riseContracts.RisePayToken.address, RisePayTokenABI, this.contract.provider)
+
+    const addresses = {}
+    // await Promise.all(payments.map(async payment => {
+    //   if (!addresses[payment.riseIdPayeeIdx]) {
+    //     addresses[payment.riseIdPayeeIdx] = await ArbTable.connect(this.contract.provider).lookupIndex(payment.riseIdPayeeIdx)
+    //   }
+
+    //   const address = addresses[payment.riseIdPayeeIdx]
+
+    //   const sent = await riseToken.txSent(this.contract.address, address, payment.amount, payment.salt)
+    //   if (sent) throw 'This payment has already been made'
+    // }))
+
+    const totalAmount = payments.reduce((sum, p) => BigNumber(sum).plus(p.amount), BigNumber(0))
+    const _payments = payments.map(p => ({ recipientIdx: p.riseIdPayeeIdx, amount: p.amount, salt: p.salt }))
+    const data = this.payContract.interface.encodeFunctionData('batchPay(uint256,tuple[])', [totalAmount.toFixed(), _payments])
+    return await this.contract.executeRise(data).then(tx => tx.wait())
+  }
+
+  /** Execute encoded transactions via this RiseIDx */
+  async execute (operation, addressOrIdxTo, value, callData) {
+    let funcSig
+    if (isAddress(addressOrIdxTo)) {
+      funcSig = 'execute(uint256,address,uint256,bytes)'
+    } else {
+      funcSig = 'execute(uint256,uint256,uint256,bytes)'
+    }
+
+    return this.contract[funcSig](operation, addressOrIdxTo, value, callData).then(tx => tx.wait())
   }
 }
 
@@ -297,5 +365,7 @@ class RiseIDFactory {
 module.exports = {
   RiseIDFactory,
   RiseIDABI,
-  certifiedAttributes, roles
+  certifiedAttributes,
+  roles,
+  riseIdOperations
 }

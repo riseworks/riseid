@@ -1,0 +1,16 @@
+[
+  "function withdraw(uint rampIdx, uint amount)",
+  "function withdraw(address ramp, uint amount)",
+  "function withdraw(uint rampIdx, uint amount, uint destIdx)",
+  "function withdraw(address ramp, uint amount, address dest)",
+  "function withdraw(uint tokenIdx, uint rampIdx, uint amount, uint destIdx)",
+  "function withdraw(address token, address ramp, uint amount, address dest)",
+  "function pay(uint recipientIdx, uint amount, uint salt)",
+  "function batchPay(uint totalAmount, Payment[] calldata payments)",
+  "function canPay(address payer, uint amount) returns (bool)",
+  "function canBePaid(address payer, address payee) returns (bool)",
+  "function canRampFund(address ramp, address sender) returns (bool)",
+  "function canRampWithdraw(address ramp, address sender) returns (bool)",
+  "function addPayee(uint payeeIdx)",
+  "function removePayee(uint payeeIdx)"
+]

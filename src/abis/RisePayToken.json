@@ -1,0 +1,3 @@
+[
+  "function txSent(address from, address to, uint amount, uint salt) returns (bool)"
+]
