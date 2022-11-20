@@ -13,16 +13,16 @@ const RISE_ENDPOINT = process.env.RISE_ID_TEST_ENDPOINT ? `${process.env.RISE_ID
 
 const RiseCertifiedAttribTypes = {
   RISE_FLAT_COUNT: 'decimal',
-  SUBSCRIPTION_PERCENT: 'decimal2',
-  SUBSCRIPTION_PERCENT_DISCOUNT: 'decimal2',
-  SUBSCRIPTION_FLAT_RATE_DISCOUNT: 'decimal2',
-  DIRECT_DEPOSIT_RAMP_TOKEN_ADDR_PERCENT_ONE: 'decimal2',
-  DIRECT_DEPOSIT_RAMP_TOKEN_ADDR_PERCENT_TWO: 'decimal2',
-  SUBSCRIPTION_FLAT_RATE: 'decimal4',
-  SUBSCRIPTION_FLAT_RATE_CREDIT_CARD: 'decimal4',
-  RISE_CREDIT: 'decimal6',
-  RISE_REFUND: 'decimal6',
-  RISE_DEDUCTION: 'decimal6',
+  SUBSCRIPTION_PERCENT: 'decimal',
+  SUBSCRIPTION_PERCENT_DISCOUNT: 'decimal',
+  SUBSCRIPTION_FLAT_RATE_DISCOUNT: 'decimal',
+  DIRECT_DEPOSIT_RAMP_TOKEN_ADDR_PERCENT_ONE: 'decimal',
+  DIRECT_DEPOSIT_RAMP_TOKEN_ADDR_PERCENT_TWO: 'decimal',
+  SUBSCRIPTION_FLAT_RATE: 'decimal',
+  SUBSCRIPTION_FLAT_RATE_CREDIT_CARD: 'decimal',
+  RISE_CREDIT: 'decimal',
+  RISE_REFUND: 'decimal',
+  RISE_DEDUCTION: 'decimal',
   SUBSCRIPTION_TYPE: 'string'
 }
 
@@ -34,13 +34,8 @@ const parseAttributes = (data, parseMap) => {
     if (type && data[v]) {
       if (type === 'string') {
         value = String.fromCharCode(...ethers.utils.arrayify((data[v])))
-      } else if(type.startsWith('decimal')) {
-        const n = parseInt(type.replace('decimal', ''))
-        const dataNumber = BigNumber(data[v])
-        if (n !== '' && !isNaN(n))
-          value = dataNumber.div(BigNumber(10).pow(n)).toNumber()
-        else
-          value = dataNumber.toNumber()
+      } else if(type === 'decimal') {
+        value = BigNumber(data[v])
       }
     }
     if (value) {
@@ -56,6 +51,7 @@ class RiseID {
   contract = null
   payContract = null
   riseContracts = null
+  arbTable = null
   l1SignerOrProvider = null
   wallets = []
 
@@ -64,6 +60,7 @@ class RiseID {
     this.riseContracts = riseContracts
     this.payContract = new ethers.Contract(this.riseContracts.RisePay.address, RisePayABI, this.contract.provider)
     this.tokenContract = new ethers.Contract(this.riseContracts.RisePayToken.address, RisePayTokenABI, this.contract.provider)
+    this.arbTable = ArbTable.connect(this.contract.provider)
   }
 
   connect(signerOrProvider) {
@@ -214,7 +211,7 @@ class RiseID {
     if ([usdcAddress, usdcIdx].includes(`${tokenAddressOrIdx}`)) rampIdx = this.riseContracts.RisePayRampUSDC.arbIndex
     else rampIdx = this.riseContracts.RisePayRampUniswap.arbIndex
 
-    const tokenIdx = await resolveAddressOrIdx(ArbTable.connect(this.contract.provider), tokenAddressOrIdx)
+    const tokenIdx = await resolveAddressOrIdx(this.arbTable, tokenAddressOrIdx)
 
     return await this.contract['executeRiseFund(uint256,uint256,uint256)'](tokenIdx, rampIdx, tokenAmount).then(tx => tx.wait())
   }
@@ -232,10 +229,9 @@ class RiseID {
     else rampIdx = this.riseContracts.RisePayRampUniswap.arbIndex
     console.log(rampIdx)
 
-    const table = ArbTable.connect(this.contract.provider)
     const [tokenIdx, fromIdx] = await Promise.all([
-      resolveAddressOrIdx(table, tokenAddressOrIdx),
-      resolveAddressOrIdx(table, fromAddressOrIdx)
+      resolveAddressOrIdx(this.arbTable, tokenAddressOrIdx),
+      resolveAddressOrIdx(this.arbTable, fromAddressOrIdx)
     ])
 
     return await this.contract['executeRiseFund(uint256,uint256,uint256,uint256)'](tokenIdx, rampIdx, tokenAmount, fromIdx).then(tx => tx.wait())
@@ -247,11 +243,10 @@ class RiseID {
 
   async fundWithTokenL1 (tokenAddress, tokenAmount) {
     if (!this.l1SignerOrProvider) throw 'You need to connect a l1 provider'
-    const l1Ramp = new ethers.Contract('0x306c8FacAE91B4722B55d2BB7A7A9e7a46c7aCCC', RisePayRampIndependentFundingABI, this.l1SignerOrProvider)
+    const l1Ramp = new ethers.Contract(this.riseContracts.RisePayRampIndependentFunding.address, RisePayRampIndependentFundingABI, this.l1SignerOrProvider)
     
     let tx
     if (tokenAddress === this.riseContracts.MAINNET_USDC.address) {
-      console.log('here')
       tx = await l1Ramp['fund(address,uint256)'](this.contract.address, tokenAmount)
     } else {
       tx = await l1Ramp['fund(address,uint256,address)'](this.contract.address, tokenAmount, tokenAddress)
@@ -265,8 +260,8 @@ class RiseID {
 
   async withdrawToken (tokenAddressOrIdx, amount, destAddressOrIdx) {
     const [tokenIdx, destIdx] = await Promise.all([
-      resolveAddressOrIdx(ArbTable.connect(this.contract.provider), tokenAddressOrIdx),
-      resolveAddressOrIdx(ArbTable.connect(this.contract.provider), destAddressOrIdx),
+      resolveAddressOrIdx(this.arbTable, tokenAddressOrIdx),
+      resolveAddressOrIdx(this.arbTable, destAddressOrIdx),
     ])
 
     const USDC = this.riseContracts.USDC
@@ -281,12 +276,6 @@ class RiseID {
     return await this.contract.executeRise(data).then(tx => tx.wait())
   }
 
-  /** bankRamp should be ACH/Wire ramps */
-  async withdrawBankAccount (usdcAmount, bankRamp) {
-    const data = this.payContract.interface.encodeFunctionData('withdraw(uint256,uint256)', [bankRamp.arbIndex, usdcAmount])
-    return await this.contract.executeRise(data).then(tx => tx.wait())
-  }
-
   async withdrawUSDCL1 (amount, destAddressOnL1) {
     if (!isAddress(destAddressOnL1)) throw 'Invalid dest address'
     const rampAddress = this.riseContracts.RisePayRampUSDCEthereumL1.address
@@ -296,7 +285,7 @@ class RiseID {
   }
 
   async pay(riseIdPayeeIdx, amount, salt) {
-    const address = await ArbTable.connect(this.contract.provider).lookupIndex(riseIdPayeeIdx)
+    const address = await this.arbTable.lookupIndex(riseIdPayeeIdx)
 
     const riseToken = new ethers.Contract(this.riseContracts.RisePayToken.address, RisePayTokenABI, this.contract.provider)
     const sent = await riseToken.txSent(this.contract.address, address, amount, salt)
@@ -312,7 +301,7 @@ class RiseID {
     const addresses = {}
     await Promise.all(payments.map(async payment => {
       if (!addresses[payment.riseIdPayeeIdx]) {
-        addresses[payment.riseIdPayeeIdx] = await ArbTable.connect(this.contract.provider).lookupIndex(payment.riseIdPayeeIdx)
+        addresses[payment.riseIdPayeeIdx] = await this.arbTable.lookupIndex(payment.riseIdPayeeIdx)
       }
 
       const address = addresses[payment.riseIdPayeeIdx]
@@ -328,38 +317,38 @@ class RiseID {
   }
 
   async addPayee (payeeAddressOrIdx) {
-    const idx = await resolveAddressOrIdx(ArbTable.connect(this.contract.provider), payeeAddressOrIdx)
+    const idx = await resolveAddressOrIdx(this.arbTable, payeeAddressOrIdx)
     const data = this.payContract.interface.encodeFunctionData('addPayee', [idx])
     return await this.contract.executeRise(data).then(tx => tx.wait())
   }
 
   async removePayee (payeeAddressOrIdx) {
-    const idx = await resolveAddressOrIdx(ArbTable.connect(this.contract.provider), payeeAddressOrIdx)
+    const idx = await resolveAddressOrIdx(this.arbTable, payeeAddressOrIdx)
     const data = this.payContract.interface.encodeFunctionData('removePayee', [idx])
     return await this.contract.executeRise(data).then(tx => tx.wait())
   }
 
   async isPayerAndPayee (payeeAddressOrIdx) {
     let address = payeeAddressOrIdx
-    if (!isAddress(address)) address = await ArbTable.connect(this.contract.provider).lookupIndex(address)
+    if (!isAddress(address)) address = await this.arbTable.lookupIndex(address)
     return await this.tokenContract.isPayerAndPayee(this.contract.address, address)
   }
 
   async getPayerAndPayeeHash (payeeAddressOrIdx) {
     let address = payeeAddressOrIdx
-    if (!isAddress(address)) address = await ArbTable.connect(this.contract.provider).lookupIndex(address)
+    if (!isAddress(address)) address = await this.arbTable.lookupIndex(address)
     return await this.tokenContract.getPayerAndPayeeHash(this.contract.address, address)
   }
 
   async canPay (payeeAddressOrIdx) {
     let address = payeeAddressOrIdx
-    if (!isAddress(address)) address = await ArbTable.connect(this.contract.provider).lookupIndex(address)
+    if (!isAddress(address)) address = await this.arbTable.lookupIndex(address)
     return this.payContract.canBePaid(this.contract.address, address)
   }
 
   async canBePaidBy (payerAddressOrIdx) {
     let address = payerAddressOrIdx
-    if (!isAddress(address)) address = await ArbTable.connect(this.contract.provider).lookupIndex(address)
+    if (!isAddress(address)) address = await this.arbTable.lookupIndex(address)
     return this.payContract.canBePaid(address, this.contract.address)
   }
 

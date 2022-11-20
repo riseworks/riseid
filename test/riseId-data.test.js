@@ -1,15 +1,19 @@
-const { RiseIDFactory, certifiedAttributes } = require('../src/riseid')
-const { ethers } = require('ethers')
-const { ArbTable } = require('../src/utils/arbTable')
 const dotenv = require('dotenv')
+const BN = require('bignumber.js')
 
 const envs = dotenv.parse(require('fs').readFileSync('./test/.env.test').toString())
 const {
   RISE_ID_ADDRESS,
   OWNER_WALLET_PRIV_KEY,
   RPC_ENDPOINT,
-  RIDE_ID_DELEGATE_PRIV_KEY
+  RIDE_ID_DELEGATE_PRIV_KEY,
+  RISE_ID_TEST_ENDPOINT
 } = envs
+
+process.env.RISE_ID_TEST_ENDPOINT = RISE_ID_TEST_ENDPOINT
+
+const { RiseIDFactory, certifiedAttributes } = require('../src/riseid')
+const { ethers } = require('ethers')
 
 describe('Read certified attributes and set/read user attributes from a RiseID', 
 () => {
@@ -56,6 +60,7 @@ describe('Read certified attributes and set/read user attributes from a RiseID',
     const userDataTypes = { EMAIL: 'string', NICKNAME: 'string', TYPE: 'string', ID: 'decimal' }
 
     await riseId.connect(provider).setData(userData)
+    userData.ID = BN(userData.ID)
     const data = await riseId.getData(Object.keys(userData), userDataTypes)
     expect(data).toEqual(userData)
 
@@ -73,13 +78,13 @@ describe('Read certified attributes and set/read user attributes from a RiseID',
 
   test('Add RiseID delegate address', async () => {
     const add = async () => {
-      await riseId.connect(provider).addDelegateAddress(riseIdDelegateAddress)
+      await riseId.connect(provider).addDelegate(riseIdDelegateAddress)
       await riseId.loadWallets()
       expect(riseId.delegates.includes(riseIdDelegateAddress)).toBe(true)
     }
 
     const remove = async () => {
-      await riseId.connect(provider).removeDelegateAddress(riseIdDelegateAddress)
+      await riseId.connect(provider).removeDelegate(riseIdDelegateAddress)
       await riseId.loadWallets()
       expect(!riseId.delegates.includes(riseIdDelegateAddress)).toBe(true)
     }
@@ -93,31 +98,6 @@ describe('Read certified attributes and set/read user attributes from a RiseID',
       await remove()
     }
   }, 2000000)
-
-  test('Add RiseID delegate by idx', async () => {
-    const idx = await ArbTable.connect(provider).lookup(riseIdDelegateAddress)
-    
-    const add = async () => {
-      await riseId.connect(provider).addDelegateIdx(idx)
-      await riseId.loadWallets()
-      expect(riseId.delegates.includes(riseIdDelegateAddress)).toBe(true)
-    }
-
-    const remove = async () => {
-      await riseId.connect(provider).removeDelegateIdx(idx)
-      await riseId.loadWallets()
-      expect(!riseId.delegates.includes(riseIdDelegateAddress)).toBe(true)
-    }
-
-    const wallets = await riseId.loadWallets()
-    if (wallets.includes(riseIdDelegateAddress)) {
-      await remove()
-      await add()
-    } else {
-      await add()
-      await remove()
-    }
-  }, 200000)
 
   test('Transfer Ownership', async () => {
     await riseId.loadWallets()
