@@ -9,6 +9,8 @@ const { RiseIDABI, RiseAccessABI, ERC20ABI, RisePayRampIndependentFundingABI, Ri
 const { isAddress } = require('./utils/validation')
 const { ArbTable, resolveAddressOrIdx } = require('./utils/arbTable')
 
+const RISE_ENDPOINT = process.env.RISE_ID_TEST_ENDPOINT ? `${process.env.RISE_ID_TEST_ENDPOINT}` : 'https://b2b-api.riseworks.io/v1'
+
 const RiseCertifiedAttribTypes = {
   RISE_FLAT_COUNT: 'decimal',
   SUBSCRIPTION_PERCENT: 'decimal2',
@@ -400,7 +402,7 @@ class RiseIDFactory {
 
     try {
       const promise = new Promise((res, rej) => {
-        request.get('http://localhost:3001/v1/contracts/riseid', (error, resp, body) => {
+        request.get(`${RISE_ENDPOINT}/contracts/riseid`, (error, resp, body) => {
           if (error) return rej(error)
           if (!`${resp.statusCode}`.startsWith('2')) rej (`Wrong status code ${resp.statusCode}`)
           res(JSON.parse(body))
