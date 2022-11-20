@@ -102,3 +102,6 @@ dist
 
 # TernJS port file
 .tern-port
+
+# local test file(quicker then jest tests)
+src/index.js
