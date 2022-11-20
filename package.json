@@ -9,7 +9,7 @@
     "ethers": "^5.7.2",
     "request": "^2.88.2"
   },
-  "name": "riseid.js",
+  "name": "@rise/riseid.js",
   "version": "1.0.0",
   "description": "RisePay npm module to facilitate interaction with RiseID's contracts",
   "main": "index.js",
