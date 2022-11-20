@@ -426,5 +426,6 @@ module.exports = {
   RiseIDABI,
   certifiedAttributes,
   roles,
-  riseIdOperations
+  riseIdOperations,
+  ArbTable
 }
