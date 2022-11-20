@@ -13,7 +13,7 @@ const resolveAddressOrIdx = async (table, addressOrIdx) => {
   try {
     return await p
   } catch (e) {
-    return addressOrIdx
+    throw `Address ${addressOrIdx} is not registered in Arbitrum Address Table`
   }
 }
 

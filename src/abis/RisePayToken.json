@@ -1,3 +1,5 @@
 [
-  "function txSent(address from, address to, uint amount, uint salt) returns (bool)"
+  "function txSent(address,address,uint,uint) view returns (bool)",
+  "function isPayerAndPayee(address,address) view returns (bool)",
+  "function getPayerAndPayeeHash(address,address) pure returns (bytes32)"
 ]

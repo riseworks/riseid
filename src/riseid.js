@@ -61,6 +61,7 @@ class RiseID {
     this.contract = contract
     this.riseContracts = riseContracts
     this.payContract = new ethers.Contract(this.riseContracts.RisePay.address, RisePayABI, this.contract.provider)
+    this.tokenContract = new ethers.Contract(this.riseContracts.RisePayToken.address, RisePayTokenABI, this.contract.provider)
   }
 
   connect(signerOrProvider) {
@@ -307,24 +308,80 @@ class RiseID {
     const riseToken = new ethers.Contract(this.riseContracts.RisePayToken.address, RisePayTokenABI, this.contract.provider)
 
     const addresses = {}
-    // await Promise.all(payments.map(async payment => {
-    //   if (!addresses[payment.riseIdPayeeIdx]) {
-    //     addresses[payment.riseIdPayeeIdx] = await ArbTable.connect(this.contract.provider).lookupIndex(payment.riseIdPayeeIdx)
-    //   }
+    await Promise.all(payments.map(async payment => {
+      if (!addresses[payment.riseIdPayeeIdx]) {
+        addresses[payment.riseIdPayeeIdx] = await ArbTable.connect(this.contract.provider).lookupIndex(payment.riseIdPayeeIdx)
+      }
 
-    //   const address = addresses[payment.riseIdPayeeIdx]
+      const address = addresses[payment.riseIdPayeeIdx]
 
-    //   const sent = await riseToken.txSent(this.contract.address, address, payment.amount, payment.salt)
-    //   if (sent) throw 'This payment has already been made'
-    // }))
+      const sent = await riseToken.txSent(this.contract.address, address, payment.amount, payment.salt)
+      if (sent) throw 'This payment has already been made'
+    }))
 
     const totalAmount = payments.reduce((sum, p) => BigNumber(sum).plus(p.amount), BigNumber(0))
     const _payments = payments.map(p => ({ recipientIdx: p.riseIdPayeeIdx, amount: p.amount, salt: p.salt }))
-    const data = this.payContract.interface.encodeFunctionData('batchPay(uint256,tuple[])', [totalAmount.toFixed(), _payments])
+    const data = this.payContract.interface.encodeFunctionData('batchPay', [totalAmount.toFixed(), _payments])
     return await this.contract.executeRise(data).then(tx => tx.wait())
   }
 
-  /** Execute encoded transactions via this RiseIDx */
+  async addPayee (payeeAddressOrIdx) {
+    const idx = await resolveAddressOrIdx(ArbTable.connect(this.contract.provider), payeeAddressOrIdx)
+    const data = this.payContract.interface.encodeFunctionData('addPayee', [idx])
+    return await this.contract.executeRise(data).then(tx => tx.wait())
+  }
+
+  async removePayee (payeeAddressOrIdx) {
+    const idx = await resolveAddressOrIdx(ArbTable.connect(this.contract.provider), payeeAddressOrIdx)
+    const data = this.payContract.interface.encodeFunctionData('removePayee', [idx])
+    return await this.contract.executeRise(data).then(tx => tx.wait())
+  }
+
+  async isPayerAndPayee (payeeAddressOrIdx) {
+    let address = payeeAddressOrIdx
+    if (!isAddress(address)) address = await ArbTable.connect(this.contract.provider).lookupIndex(address)
+    return await this.tokenContract.isPayerAndPayee(this.contract.address, address)
+  }
+
+  async getPayerAndPayeeHash (payeeAddressOrIdx) {
+    let address = payeeAddressOrIdx
+    if (!isAddress(address)) address = await ArbTable.connect(this.contract.provider).lookupIndex(address)
+    return await this.tokenContract.getPayerAndPayeeHash(this.contract.address, address)
+  }
+
+  async canPay (payeeAddressOrIdx) {
+    let address = payeeAddressOrIdx
+    if (!isAddress(address)) address = await ArbTable.connect(this.contract.provider).lookupIndex(address)
+    return this.payContract.canBePaid(this.contract.address, address)
+  }
+
+  async canBePaidBy (payerAddressOrIdx) {
+    let address = payerAddressOrIdx
+    if (!isAddress(address)) address = await ArbTable.connect(this.contract.provider).lookupIndex(address)
+    return this.payContract.canBePaid(address, this.contract.address)
+  }
+
+  async canRampFund (ramp) {
+    return await this.payContract.canRampFund(ramp.address, this.contract.address)
+  }
+
+  async canRampWithdraw (ramp) {
+    return await this.payContract.canRampWithdraw(ramp.address, this.contract.address)
+  }
+
+  async role () {
+    const r = await this.contract.role()
+    return roles[r]
+  }
+
+  async isDelegate (addressOrIdx) {
+    if (isAddress(addressOrIdx)) {
+      return await this.contract['isDelegate(address)'](addressOrIdx)
+    }
+    return await this.contract['isDelegate(uint256)'](addressOrIdx)
+  }
+
+  /** Execute encoded transactions via this RiseID */
   async execute (operation, addressOrIdxTo, value, callData) {
     let funcSig
     if (isAddress(addressOrIdxTo)) {

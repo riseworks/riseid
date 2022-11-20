@@ -6,11 +6,45 @@
   "function withdraw(uint tokenIdx, uint rampIdx, uint amount, uint destIdx)",
   "function withdraw(address token, address ramp, uint amount, address dest)",
   "function pay(uint recipientIdx, uint amount, uint salt)",
-  "function batchPay(uint totalAmount, Payment[] calldata payments)",
   "function canPay(address payer, uint amount) returns (bool)",
-  "function canBePaid(address payer, address payee) returns (bool)",
-  "function canRampFund(address ramp, address sender) returns (bool)",
-  "function canRampWithdraw(address ramp, address sender) returns (bool)",
   "function addPayee(uint payeeIdx)",
-  "function removePayee(uint payeeIdx)"
+  "function removePayee(uint payeeIdx)",
+  "function canRampFund(address ramp, address sender) view returns (bool)",
+  "function canRampWithdraw(address ramp, address sender) view returns (bool)",
+  "function canBePaid(address payer, address payee) view returns (bool)",
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "totalAmount",
+        "type": "uint256"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "recipientIdx",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "salt",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct IRisePay.Payment[]",
+        "name": "payments",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "batchPay",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
 ]
